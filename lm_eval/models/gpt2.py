@@ -1,6 +1,11 @@
 import transformers
 import torch
 from lm_eval.base import BaseLM
+import numpy as np
+
+from transformer_utils.logit_lens.plotting import collect_logits, postprocess_logits
+from transformer_utils.logit_lens.hooks import make_lens_hooks, clear_lens_hooks
+from transformer_utils.logit_lens.layer_names import make_layer_names
 
 
 class HFLM(BaseLM):
@@ -46,6 +51,9 @@ class HFLM(BaseLM):
         # if gpus > 1:
         #     self.gpt2 = nn.DataParallel(self.gpt2)
 
+        self.layer_names = make_layer_names(self.gpt2)
+        make_lens_hooks(self.gpt2, layer_names=self.layer_names)
+
     @property
     def eot_token_id(self):
         # we use EOT because end of *text* is more accurate for what we're doing than end of *sentence*
@@ -87,17 +95,37 @@ class HFLM(BaseLM):
         returns: a torch tensor of shape [batch, sequence, vocab] with the
         logits returned from the model
         """
+        self.gpt2._last_resid = None
         with torch.no_grad():
-            return self.gpt2(inps)[0][:, :, :50257]
-    
+            out = self.gpt2(inps)[0][:, :, :50257]
+        self.gpt2._last_resid = None
+
+        layer_logits = np.concatenate(
+            [self.gpt2._layer_logits[name] for name in self.layer_names],
+            axis=0,
+        )
+
+        # XXX - truncate the logits to 50257??
+        layer_preds, layer_probs = postprocess_logits(layer_logits)
+        return out, np.expand_dims(layer_probs, axis=0)
+
     def _model_generate(self, context, max_length, eos_token_id):
-        return self.gpt2.generate(
+        self.gpt2._last_resid = None
+        out = self.gpt2.generate(
             context,
             max_length=max_length,
             eos_token_id=eos_token_id,
-            do_sample=False
+            do_sample=False)
+        self.gpt2._last_resid = None
+
+        layer_logits = np.concatenate(
+            [self.gpt2._layer_logits[name] for name in self.layer_names],
+            axis=0,
         )
 
+        layer_preds, layer_probs = postprocess_logits(layer_logits)
+
+        return out #, layer_probs
 
 # for backwards compatibility
 GPT2LM = HFLM

@@ -44,5 +44,7 @@ setuptools.setup(
         "openai==0.6.4",
         "jieba==0.42.1",
         "nagisa==0.2.7",
+        "transformer_utils==0.1.0",
+        "colorcet==3.0.0",
     ]
 )

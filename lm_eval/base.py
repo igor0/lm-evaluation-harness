@@ -271,35 +271,47 @@ class BaseLM(LM):
                 inplens.append(inplen)
 
             batched_inps = torch.cat(inps, dim=0)  # [batch, padding_length
-            multi_logits = F.log_softmax(self._model_call(batched_inps), dim=-1).cpu()  # [batch, padding_length, vocab]
+            model_out, logit_lens = self._model_call(batched_inps)
 
-            for (cache_key, _, _), logits, inp, inplen, cont_toks \
-                    in zip(chunk, multi_logits, inps, inplens, cont_toks_list):
+            logit_lens = torch.from_numpy(logit_lens)
+            multi_logits = F.log_softmax(model_out, dim=-1).cpu()  # [batch, padding_length, vocab]
+            multi_lens = F.log_softmax(logit_lens, dim=-1).cpu() # [batch, layer, padding_length, vocab]
 
-                # Slice to original seq length
-                contlen = len(cont_toks)
-                logits = logits[inplen-contlen:inplen].unsqueeze(0)  # [1, seq, vocab]
-
-                # Check if per-token argmax is exactly equal to continuation
-                greedy_tokens = logits.argmax(dim=-1)
-                cont_toks = torch.tensor(cont_toks, dtype=torch.long).unsqueeze(0)  # [1, seq]
-                max_equal = (greedy_tokens == cont_toks).all()
-
-                # Obtain log-probs at the corresponding continuation token indices
-                # last_token_slice = logits[:, -1, :].squeeze(0).tolist()
-                logits = torch.gather(logits, 2, cont_toks.unsqueeze(-1)).squeeze(-1)  # [1, seq]
+            for (cache_key, _, _), logits, lens, inp, inplen, cont_toks \
+                    in zip(chunk, multi_logits, multi_lens, inps, inplens, cont_toks_list):
 
                 # Answer: (log prob, is-exact-match)
-                answer = (float(logits.sum()), bool(max_equal))
+                answer = self.calc_prob(cont_toks, logits, inplen)
+
+                lens_answer = []
+                for i in range(0, len(lens)):
+                    lens_answer.append(self.calc_prob(cont_toks, lens[i, ...], inplen))
 
                 # partial caching
                 if cache_key is not None:
                     self.cache_hook.add_partial("loglikelihood", cache_key, answer)
 
-                res.append(answer)
+                res.append(ExtendedResponse(answer, lens_answer))
 
         return reord.get_original(res)
     
+    def calc_prob(self, cont_toks, logits, inplen):
+        # Slice to original seq length
+        contlen = len(cont_toks)
+        logits = logits[inplen-contlen:inplen].unsqueeze(0)  # [1, seq, vocab]
+
+        # Check if per-token argmax is exactly equal to continuation
+        greedy_tokens = logits.argmax(dim=-1)
+        cont_toks = torch.tensor(cont_toks, dtype=torch.long).unsqueeze(0)  # [1, seq]
+        max_equal = (greedy_tokens == cont_toks).all()
+
+        # Obtain log-probs at the corresponding continuation token indices
+        # last_token_slice = logits[:, -1, :].squeeze(0).tolist()
+        logits = torch.gather(logits, 2, cont_toks.unsqueeze(-1)).squeeze(-1)  # [1, seq]
+
+        # Answer: (log prob, is-exact-match)
+        return (float(logits.sum()), bool(max_equal))
+
     def greedy_until(self, requests):
         # TODO: implement fully general `until` that handles untils that are 
         #       multiple tokens or that span multiple tokens correctly
@@ -699,5 +711,9 @@ class RequestFactory:
             return Request(attr, args)
         return fn
 
+class ExtendedResponse:
+    def __init__(self, result, logit_lens=None):
+        self.result = result
+        self.logit_lens = logit_lens
 
 rf = RequestFactory()

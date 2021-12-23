@@ -45,7 +45,7 @@ def simple_evaluate(model, model_args, task_names,
         lm = lm_eval.base.CachingLM(
             lm, 'lm_cache/' + model + '_' + model_args.replace('=', '-').replace(',', '_').replace('/', '-') + '.db'
         )
-    
+
     task_dict = lm_eval.tasks.get_task_dict(task_names)
     results = evaluate(lm, task_dict, False, num_fewshot, limit)
 
@@ -94,6 +94,7 @@ def evaluate(lm, task_dict, provide_description, num_fewshot, limit, bootstrap_i
     ]
 
     results = collections.defaultdict(dict)
+    lens_results = collections.defaultdict(dict)
     versions = collections.defaultdict(dict)
 
     requests = collections.defaultdict(list)
@@ -160,21 +161,33 @@ def evaluate(lm, task_dict, provide_description, num_fewshot, limit, bootstrap_i
 
         for resp, (i, task_name, doc, doc_id) in zip(resps, requests_origin[reqtype]):
             process_res_queue[(task_name, doc_id)].append((i, resp))
-    
+
     vals = collections.defaultdict(list)
+    lens_vals = collections.defaultdict(list)
 
     # unpack results and sort back in order and return control to Task
+    layers = 0
+
     for (task_name, doc_id), requests in process_res_queue.items():
         requests.sort(key=lambda x: x[0])
-        requests = [x[1] for x in requests]
+        responses = [x[1].result for x in requests]
 
         task = task_dict[task_name]
         doc = docs[(task_name, doc_id)]
 
-        metrics = task.process_results(doc, requests)
+        metrics = task.process_results(doc, responses)
         for metric, value in metrics.items():
             vals[(task_name, metric)].append(value)
-    
+
+        if len(requests) > 0:
+            ll_layer_count = len(requests[0][1].logit_lens)
+
+            for layer_idx in range(0, ll_layer_count):
+                resp = [x[1].logit_lens[layer_idx] for x in requests]
+                lens_metrics = task.process_results(doc, resp)
+                for metric, value in lens_metrics.items():
+                    lens_vals[(task_name, layer_idx, metric)].append(value)
+
     # aggregate results
     for (task_name, metric), items in vals.items():
         task = task_dict[task_name]
@@ -188,9 +201,14 @@ def evaluate(lm, task_dict, provide_description, num_fewshot, limit, bootstrap_i
         )
         if stderr is not None:
             results[task_name][metric + "_stderr"] = stderr(items)
-    
+
+    for (task_name, layer_idx, metric), items in lens_vals.items():
+        task = task_dict[task_name]
+        lens_results[task_name]["{}.layer{}".format(metric, layer_idx)] = task.aggregation()[metric](items)
+
     return {
         "results": dict(results),
+        "lens-results": dict(lens_results),
         "versions": dict(versions)
     }
 
