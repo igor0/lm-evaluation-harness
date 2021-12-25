@@ -3,8 +3,7 @@ import torch
 from lm_eval.base import BaseLM
 import numpy as np
 
-from transformer_utils.logit_lens.plotting import collect_logits, postprocess_logits
-from transformer_utils.logit_lens.hooks import make_lens_hooks, clear_lens_hooks
+from transformer_utils.logit_lens.hooks import make_lens_hooks
 from transformer_utils.logit_lens.layer_names import make_layer_names
 
 
@@ -106,8 +105,7 @@ class HFLM(BaseLM):
         )
 
         # XXX - truncate the logits to 50257??
-        layer_preds, layer_probs = postprocess_logits(layer_logits)
-        return out, np.expand_dims(layer_probs, axis=0)
+        return out, np.expand_dims(layer_logits, axis=0)
 
     def _model_generate(self, context, max_length, eos_token_id):
         self.gpt2._last_resid = None
@@ -123,9 +121,7 @@ class HFLM(BaseLM):
             axis=0,
         )
 
-        layer_preds, layer_probs = postprocess_logits(layer_logits)
-
-        return out #, layer_probs
+        return out #, layer_preds
 
 # for backwards compatibility
 GPT2LM = HFLM
