@@ -198,12 +198,18 @@ class BaseLM(LM):
             # TODO: extract out this call so it only gets called once and also somehow figure out partial caching for
             # that
             string_nll = self._loglikelihood_tokens(rolling_token_windows, disable_tqdm=True)
-            
-            # discard is_greedy
-            string_nll = [x[0] for x in string_nll]
-            
-            string_nll = sum(string_nll)
-            loglikelihoods.append(string_nll)
+            print(string_nll)
+
+            # Aggregate the response. Keep the logit value only and ignore is_greedy.
+            resp = ExtendedResponse(0, None)
+            for x in string_nll:
+                resp.result += x.result[0]
+                if resp.logit_lens is None:
+                    resp.logit_lens = [0] * len(x.logit_lens)
+                for i in range(len(resp.logit_lens)):
+                    resp.logit_lens[i] += x.logit_lens[i][0]
+
+            loglikelihoods.append(resp)
 
         return loglikelihoods
 
@@ -288,10 +294,11 @@ class BaseLM(LM):
                     lens_answer.append(self.calc_prob(cont_toks, lens[i, ...], inplen))
 
                 # partial caching
+                response = ExtendedResponse(answer, lens_answer)
                 if cache_key is not None:
-                    self.cache_hook.add_partial("loglikelihood", cache_key, answer)
+                    self.cache_hook.add_partial("loglikelihood", cache_key, response)
 
-                res.append(ExtendedResponse(answer, lens_answer))
+                res.append(response)
 
         return reord.get_original(res)
     
@@ -333,7 +340,7 @@ class BaseLM(LM):
             
             context_enc = torch.tensor([self.tok_encode(context)[self.max_gen_toks - self.max_length:]]).to(self.device)
 
-            cont = self._model_generate(context_enc, context_enc.shape[1] + self.max_gen_toks, primary_until)
+            cont, logit_lens = self._model_generate(context_enc, context_enc.shape[1] + self.max_gen_toks, primary_until)
 
             s = self.tok_decode(cont[0].tolist()[context_enc.shape[1]:])
 
@@ -569,6 +576,7 @@ class PerplexityTask(Task, abc.ABC):
         loglikelihood, = results
         words = self.count_words(doc)
         bytes_ = self.count_bytes(doc)
+
         return {
             "word_perplexity": (loglikelihood, words),
             "byte_perplexity": (loglikelihood, bytes_),

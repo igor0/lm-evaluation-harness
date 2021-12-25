@@ -121,7 +121,7 @@ class HFLM(BaseLM):
             axis=0,
         )
 
-        return out #, layer_preds
+        return out, layer_logits
 
 # for backwards compatibility
 GPT2LM = HFLM
