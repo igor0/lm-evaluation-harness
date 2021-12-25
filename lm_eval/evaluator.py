@@ -157,7 +157,9 @@ def evaluate(lm, task_dict, provide_description, num_fewshot, limit, bootstrap_i
 
         print("Running", reqtype, "requests")
         resps = getattr(lm, reqtype)([req.args for req in reqs])
-        resps = [x if req.index is None else x[req.index] for x, req in zip(resps, reqs)]
+
+        for i in range(0, len(reqs)):
+            resps[i].select_result(reqs[i].index)
 
         for resp, (i, task_name, doc, doc_id) in zip(resps, requests_origin[reqtype]):
             process_res_queue[(task_name, doc_id)].append((i, resp))

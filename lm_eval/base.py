@@ -201,7 +201,7 @@ class BaseLM(LM):
             print(string_nll)
 
             # Aggregate the response. Keep the logit value only and ignore is_greedy.
-            resp = ExtendedResponse(0, None)
+            resp = Response(0, None)
             for x in string_nll:
                 resp.result += x.result[0]
                 if resp.logit_lens is None:
@@ -294,7 +294,7 @@ class BaseLM(LM):
                     lens_answer.append(self.calc_prob(cont_toks, lens[i, ...], inplen))
 
                 # partial caching
-                response = ExtendedResponse(answer, lens_answer)
+                response = Response(answer, lens_answer)
                 if cache_key is not None:
                     self.cache_hook.add_partial("loglikelihood", cache_key, response)
 
@@ -719,9 +719,15 @@ class RequestFactory:
             return Request(attr, args)
         return fn
 
-class ExtendedResponse:
+class Response:
     def __init__(self, result, logit_lens=None):
         self.result = result
         self.logit_lens = logit_lens
+
+    def select_result(self, res_idx):
+        if res_idx is not None:
+            self.result = self.result[res_idx]
+            for j in range(0, len(self.logit_lens)):
+                self.logit_lens[j] = self.logit_lens[j][res_idx]
 
 rf = RequestFactory()
