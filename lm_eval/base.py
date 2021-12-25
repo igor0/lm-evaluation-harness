@@ -198,7 +198,6 @@ class BaseLM(LM):
             # TODO: extract out this call so it only gets called once and also somehow figure out partial caching for
             # that
             string_nll = self._loglikelihood_tokens(rolling_token_windows, disable_tqdm=True)
-            print(string_nll)
 
             # Aggregate the response. Keep the logit value only and ignore is_greedy.
             resp = Response(0, None)
@@ -278,20 +277,26 @@ class BaseLM(LM):
 
             batched_inps = torch.cat(inps, dim=0)  # [batch, padding_length
             model_out, logit_lens = self._model_call(batched_inps)
-
-            logit_lens = torch.from_numpy(logit_lens)
             multi_logits = F.log_softmax(model_out, dim=-1).cpu()  # [batch, padding_length, vocab]
-            multi_lens = F.log_softmax(logit_lens, dim=-1).cpu() # [batch, layer, padding_length, vocab]
 
-            for (cache_key, _, _), logits, lens, inp, inplen, cont_toks \
-                    in zip(chunk, multi_logits, multi_lens, inps, inplens, cont_toks_list):
+            if logit_lens is not None:
+                logit_lens = torch.from_numpy(logit_lens)
+                multi_lens = F.log_softmax(logit_lens, dim=-1).cpu() # [batch, layer, padding_length, vocab]
+            else:
+                multi_lens = [None] * len(chunk)
+
+            for (cache_key, _, _), logits, lens, inplen, cont_toks \
+                    in zip(chunk, multi_logits, multi_lens, inplens, cont_toks_list):
 
                 # Answer: (log prob, is-exact-match)
                 answer = self.calc_prob(cont_toks, logits, inplen)
 
-                lens_answer = []
-                for i in range(0, len(lens)):
-                    lens_answer.append(self.calc_prob(cont_toks, lens[i, ...], inplen))
+                if lens is None:
+                    lens_answer = None
+                else:
+                    lens_answer = []
+                    for i in range(0, len(lens)):
+                        lens_answer.append(self.calc_prob(cont_toks, lens[i, ...], inplen))
 
                 # partial caching
                 response = Response(answer, lens_answer)
@@ -341,6 +346,8 @@ class BaseLM(LM):
             context_enc = torch.tensor([self.tok_encode(context)[self.max_gen_toks - self.max_length:]]).to(self.device)
 
             cont, logit_lens = self._model_generate(context_enc, context_enc.shape[1] + self.max_gen_toks, primary_until)
+
+            # XXX: do something about logit_lens
 
             s = self.tok_decode(cont[0].tolist()[context_enc.shape[1]:])
 
@@ -727,7 +734,8 @@ class Response:
     def select_result(self, res_idx):
         if res_idx is not None:
             self.result = self.result[res_idx]
-            for j in range(0, len(self.logit_lens)):
-                self.logit_lens[j] = self.logit_lens[j][res_idx]
+            if self.logit_lens is not None:
+                for j in range(0, len(self.logit_lens)):
+                    self.logit_lens[j] = self.logit_lens[j][res_idx]
 
 rf = RequestFactory()

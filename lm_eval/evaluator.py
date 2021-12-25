@@ -181,7 +181,7 @@ def evaluate(lm, task_dict, provide_description, num_fewshot, limit, bootstrap_i
         for metric, value in metrics.items():
             vals[(task_name, metric)].append(value)
 
-        if len(requests) > 0:
+        if len(requests) > 0 and requests[0][1].logit_lens is not None:
             ll_layer_count = len(requests[0][1].logit_lens)
 
             for layer_idx in range(0, ll_layer_count):
@@ -204,15 +204,21 @@ def evaluate(lm, task_dict, provide_description, num_fewshot, limit, bootstrap_i
         if stderr is not None:
             results[task_name][metric + "_stderr"] = stderr(items)
 
+    # aggregate logit lens results (if enabled)
     for (task_name, layer_idx, metric), items in lens_vals.items():
         task = task_dict[task_name]
-        lens_results[task_name]["{}.layer{}".format(metric, layer_idx)] = task.aggregation()[metric](items)
+        metric_name = "{}.layer{}".format(metric, layer_idx) if layer_idx > 0 else metric + ".tokens"
+        lens_results[task_name][metric_name] = task.aggregation()[metric](items)
 
-    return {
+    res = {
         "results": dict(results),
-        "lens-results": dict(lens_results),
         "versions": dict(versions)
     }
+
+    if len(lens_results) > 0:
+        res["lens-results"] = dict(lens_results)
+
+    return res
 
 
 def make_table(result_dict):

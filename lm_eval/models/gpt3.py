@@ -1,7 +1,7 @@
 import os
 import numpy as np
 import transformers
-from lm_eval.base import BaseLM
+from lm_eval.base import BaseLM, Response
 from lm_eval import utils
 from tqdm import tqdm
 import time
@@ -140,7 +140,7 @@ class GPT3LM(BaseLM):
             )
 
             for resp, ctxlen, (cache_key, context_enc, continuation_enc) in zip(response.choices, ctxlens, chunk):
-                answer = get_result(resp, ctxlen)
+                answer = base.Response(get_result(resp, ctxlen))
 
                 res.append(answer)
 

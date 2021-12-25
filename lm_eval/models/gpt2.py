@@ -9,12 +9,15 @@ from transformer_utils.logit_lens.layer_names import make_layer_names
 
 class HFLM(BaseLM):
 
-    def __init__(self, device='cuda', pretrained='gpt2', revision='main', subfolder=None, tokenizer=None, batch_size=1):
+    def __init__(self, device='cuda', pretrained='gpt2', revision='main', logit_lens=None, subfolder=None, tokenizer=None, batch_size=1):
         super().__init__()
 
         assert isinstance(device, str)
         assert isinstance(pretrained, str)
         assert isinstance(batch_size, int)
+        assert logit_lens in [None, "on", "off"]
+
+        logit_lens_enabled = logit_lens == "on"
 
         if device:
             self._device = torch.device(device)
@@ -50,8 +53,11 @@ class HFLM(BaseLM):
         # if gpus > 1:
         #     self.gpt2 = nn.DataParallel(self.gpt2)
 
-        self.layer_names = make_layer_names(self.gpt2)
-        make_lens_hooks(self.gpt2, layer_names=self.layer_names)
+        if logit_lens_enabled:
+            self.layer_names = make_layer_names(self.gpt2)
+            make_lens_hooks(self.gpt2, layer_names=self.layer_names)
+        else:
+            self.layer_names = None
 
     @property
     def eot_token_id(self):
@@ -99,13 +105,7 @@ class HFLM(BaseLM):
             out = self.gpt2(inps)[0][:, :, :50257]
         self.gpt2._last_resid = None
 
-        layer_logits = np.concatenate(
-            [self.gpt2._layer_logits[name] for name in self.layer_names],
-            axis=0,
-        )
-
-        # XXX - truncate the logits to 50257??
-        return out, np.expand_dims(layer_logits, axis=0)
+        return self.extend_response(out)
 
     def _model_generate(self, context, max_length, eos_token_id):
         self.gpt2._last_resid = None
@@ -116,11 +116,20 @@ class HFLM(BaseLM):
             do_sample=False)
         self.gpt2._last_resid = None
 
-        layer_logits = np.concatenate(
-            [self.gpt2._layer_logits[name] for name in self.layer_names],
-            axis=0,
-        )
+        return self.extend_response(out)
 
+    def extend_response(self, out):
+        if self.layer_names is None:
+            # no logit lens
+            return out, None
+
+        # collect the logit lens values.
+        # TODO: requires quite a bit of contiguous memory; can be optimized
+        layer_logits = np.stack(
+            [self.gpt2._layer_logits[name] for name in self.layer_names],
+        ) # [layer, batch, seq, vocab]
+
+        layer_logits = np.swapaxes(layer_logits, 0, 1) # [batch, layer, seq, vocab]
         return out, layer_logits
 
 # for backwards compatibility
