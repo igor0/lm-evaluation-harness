@@ -57,6 +57,8 @@ class BlimpTask(HFTask):
 
         # the model got this case right iff the good sentence scored higher than the bad sentence
         acc = 1.0 if likelihood1 > likelihood2 else 0.0
+        if likelihood1 == likelihood2:
+            acc = 0.5
 
         return {
             "acc": acc,
