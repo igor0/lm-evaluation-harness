@@ -1,11 +1,12 @@
 import transformers
 import torch
+from lm_eval.models.gpt2aug import from_pretrained
 from lm_eval.base import BaseLM
 
 
 class HFLM(BaseLM):
 
-    def __init__(self, device='cuda', pretrained='gpt2', revision='main', subfolder=None, tokenizer=None, batch_size=1):
+    def __init__(self, device='cuda', pretrained='gpt2', revision='main', subfolder=None, tokenizer=None, batch_size=1, aug=None):
         super().__init__()
 
         assert isinstance(device, str)
@@ -18,8 +19,8 @@ class HFLM(BaseLM):
             self._device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
         # TODO: update this to be less of a hack once subfolder is fixed in HF
-        self.gpt2 = transformers.AutoModelForCausalLM.from_pretrained(
-            pretrained, revision=revision + ("/" + subfolder if subfolder is not None else "")
+        self.gpt2 = from_pretrained(
+            aug, pretrained, revision=revision + ("/" + subfolder if subfolder is not None else "")
         ).to(self.device)
         self.gpt2.eval()
 
