@@ -22,11 +22,21 @@ https://huggingface.co/models?filter=causal-lm
 # You can also adapt this script on your own causal language modeling task. Pointers for this are left as comments.
 
 import torch
+import torch.nn
 import transformers
 from transformers import GPT2LMHeadModel
 from datasets import load_dataset
 from torch.nn import CrossEntropyLoss
 from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
+
+REF_LM_HEAD = "/mnt/ssd-1/igor/data/step2/pile-lm_head/gpt2-medium.layers.1"
+
+class GPT2AugReplaceLMH(GPT2LMHeadModel):
+    def from_pretrained(*args, **kwargs):
+        ref = GPT2AugLMHead.from_pretrained(REF_LM_HEAD)
+        model = GPT2LMHeadModel.from_pretrained(*args, **kwargs)
+        model.lm_head = ref.lm_head
+        return model
 
 class GPT2AugCProj(GPT2LMHeadModel):
     def should_tune(self, param_name):
@@ -42,7 +52,6 @@ class GPT2AugLMHead(GPT2LMHeadModel):
 
     def should_tune(self, param_name):
         return "lm_head" in param_name        
-
 
 class GPT2AugProjected(GPT2LMHeadModel):
     def init_weights(self):
@@ -138,6 +147,22 @@ class GPT2AugProjected(GPT2LMHeadModel):
             cross_attentions=transformer_outputs.cross_attentions,
         )
 
+class GPT2AugProjectedDiag(GPT2AugProjected):
+    def from_pretrained(*args, **kwargs):
+        model = GPT2AugProjected.from_pretrained(*args, **kwargs)
+        proj = model.projector
+        if True:
+            mat = proj.weight
+
+            zero_tensor = torch.zeros(len(mat), len(mat))
+            mat = torch.where(torch.abs(mat) > 0.1, mat, zero_tensor)
+            proj.weight = torch.nn.Parameter(mat)
+        if False:
+            # zero out the bias in the projection
+            proj.bias = torch.nn.Parameter(torch.zeros(len(proj.bias)))
+        return model
+
+
 def from_pretrained(model_aug, *args, **kwargs):
     if model_aug is None:
         model_type = transformers.GPT2LMHeadModel
@@ -145,8 +170,12 @@ def from_pretrained(model_aug, *args, **kwargs):
         model_type = GPT2AugLMHead
     elif model_aug == "proj":
         model_type = GPT2AugProjected
+    elif model_aug == "projdiag":
+        model_type = GPT2AugProjectedDiag
     elif model_aug == "cproj":
         model_type = GPT2AugCProj
+    elif model_aug == "replace_lmh":
+        model_type = GPT2AugReplaceLMH
     else:
         model_type = None
 
