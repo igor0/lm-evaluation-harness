@@ -43,7 +43,6 @@ from . import pile
 from . import wikitext
 from . import lambada_multilingual
 from . import mutual
-from . import truthfulqa
 from . import blimp
 
 ########################################
